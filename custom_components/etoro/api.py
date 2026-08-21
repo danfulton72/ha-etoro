@@ -131,7 +131,12 @@ class EToroApiClient:
         rates = data if isinstance(data, list) else data.get("rates", data.get("Rates", []))
         result = {}
         for r in rates:
-            iid = r.get("instrumentID") or r.get("InstrumentId")
+            iid = (
+                r.get("instrumentId")
+                or r.get("instrumentID")
+                or r.get("InstrumentId")
+                or r.get("InstrumentID")
+            )
             if iid is not None:
                 result[int(iid)] = r
         _LOGGER.debug("eToro rates parsed keys: %s", list(result.keys())[:10])
@@ -153,7 +158,13 @@ class EToroApiClient:
         instruments = data if isinstance(data, list) else data.get("instruments", data.get("Instruments", []))
         result = {}
         for inst in instruments:
-            iid = inst.get("instrumentId") or inst.get("InstrumentId")
+            iid = (
+                inst.get("instrumentId")
+                or inst.get("instrumentID")
+                or inst.get("InstrumentId")
+                or inst.get("InstrumentID")
+            )
             if iid is not None:
                 result[int(iid)] = inst
+        _LOGGER.debug("eToro instruments parsed keys: %s", list(result.keys())[:10])
         return result

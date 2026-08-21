@@ -123,14 +123,18 @@ async def test_get_rates_parses_multiple_casing_variants_and_keys_by_int():
     session = _FakeSession(payload=[
         {"instrumentID": 1001, "bid": 1.1, "ask": 1.2},
         {"InstrumentId": 2002, "bid": 2.1, "ask": 2.2},
+        {"instrumentId": 3003, "bid": 3.1, "ask": 3.2},
+        {"InstrumentID": 4004, "bid": 4.1, "ask": 4.2},
     ])
     client = _client(session)
-    rates = await client.get_rates([1001, 2002])
-    assert set(rates.keys()) == {1001, 2002}
+    rates = await client.get_rates([1001, 2002, 3003, 4004])
+    assert set(rates.keys()) == {1001, 2002, 3003, 4004}
     assert rates[1001]["bid"] == 1.1
     assert rates[2002]["bid"] == 2.1
+    assert rates[3003]["bid"] == 3.1
+    assert rates[4004]["bid"] == 4.1
     # comma-joined ids sent as query param
-    assert session.last_params["instrumentIds"] == "1001,2002"
+    assert session.last_params["instrumentIds"] == "1001,2002,3003,4004"
 
 
 @pytest.mark.asyncio
@@ -149,3 +153,18 @@ async def test_get_instruments_parses_metadata_by_instrument_id():
     client = _client(session)
     result = await client.get_instruments([1001])
     assert result[1001]["displayname"] == "Apple Inc"
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_handles_all_id_casing_variants():
+    """Regression test: real-world response used 'instrumentID' (capital ID),
+    which the original code didn't check, so metadata lookups silently
+    returned nothing and instrument_name fell back to 'Instrument <id>'."""
+    session = _FakeSession(payload={"instruments": [
+        {"instrumentID": 4016, "displayname": "Some Stock", "internalSymbolFull": "SOME"},
+        {"InstrumentID": 4017, "displayname": "Other Stock", "internalSymbolFull": "OTHR"},
+    ]})
+    client = _client(session)
+    result = await client.get_instruments([4016, 4017])
+    assert result[4016]["displayname"] == "Some Stock"
+    assert result[4017]["displayname"] == "Other Stock"
