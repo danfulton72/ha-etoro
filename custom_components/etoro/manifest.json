@@ -1,0 +1,11 @@
+{
+  "domain": "etoro",
+  "name": "eToro",
+  "version": "1.0.0",
+  "documentation": "https://api-portal.etoro.com/",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [],
+  "iot_class": "cloud_polling",
+  "config_flow": true
+}
