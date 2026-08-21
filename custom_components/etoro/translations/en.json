@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "eToro API Configuration",
+        "description": "Enter your eToro API credentials. Get them from eToro Settings → Trading → API Key Management.",
+        "data": {
+          "api_key": "Public API Key (x-api-key)",
+          "user_key": "User Key (x-user-key)",
+          "environment": "Environment",
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Authentication failed. Check your API keys.",
+      "cannot_connect": "Cannot connect to eToro API.",
+      "unknown": "Unexpected error. Check logs."
+    },
+    "abort": {
+      "already_configured": "eToro is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "eToro Options",
+        "data": {
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    }
+  }
+}

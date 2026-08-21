@@ -2,10 +2,10 @@
   "domain": "etoro",
   "name": "eToro",
   "version": "1.0.0",
-  "documentation": "https://api-portal.etoro.com/",
+  "documentation": "https://github.com/danfulton72/ha-etoro",
   "requirements": [],
   "dependencies": [],
-  "codeowners": [],
+  "codeowners": ["@danfulton72"],
   "iot_class": "cloud_polling",
   "config_flow": true
 }
