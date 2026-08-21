@@ -64,6 +64,7 @@ class EToroData:
     watchlists: list[dict] = field(default_factory=list)
     watchlist_instruments: list[WatchlistInstrument] = field(default_factory=list)
     rates_by_instrument: dict[int, dict] = field(default_factory=dict)
+    instruments_by_id: dict[int, dict] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # Portfolio properties - all data nested under clientPortfolio
@@ -185,8 +186,18 @@ class EToroData:
                 else:
                     current_rate = ask or bid
 
+            meta = self.instruments_by_id.get(iid, {}) if iid is not None else {}
+            instrument_name = _get_ci(
+                meta, "displayname", "displayName", "DisplayName"
+            ) or (f"Instrument {iid}" if iid is not None else "Unknown")
+            symbol = _get_ci(
+                meta, "internalSymbolFull", "symbol", "Symbol"
+            )
+
             result.append({
                 "instrument_id": iid,
+                "instrument_name": instrument_name,
+                "symbol": symbol,
                 "amount": p.get("amount"),
                 "unrealized_pl": unrealized.get("pnL"),
                 "open_rate": p.get("openRate"),
@@ -238,21 +249,34 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
             # Fetch watchlist items + market data
             watchlist_instruments = await self._fetch_watchlist_prices(watchlists)
 
-            # Fetch live rates for open-position instruments (needed to fill
-            # in current_rate, since the pnl response doesn't always embed it)
+            # Fetch live rates + display-name metadata for open-position
+            # instruments (rates fill in current_rate, metadata resolves
+            # instrument_name instead of a bare numeric id)
             position_ids = self._extract_position_instrument_ids(pnl)
             rates_by_instrument: dict[int, dict] = {}
+            instruments_by_id: dict[int, dict] = {}
             if position_ids:
-                try:
-                    rates_by_instrument = await self.client.get_rates(list(position_ids))
-                except Exception as err:
-                    _LOGGER.warning("Failed to fetch position rates: %s", err)
+                results = await asyncio.gather(
+                    self.client.get_rates(list(position_ids)),
+                    self.client.get_instruments(list(position_ids)),
+                    return_exceptions=True,
+                )
+                rates_result, instruments_result = results
+                if isinstance(rates_result, Exception):
+                    _LOGGER.warning("Failed to fetch position rates: %s", rates_result)
+                else:
+                    rates_by_instrument = rates_result
+                if isinstance(instruments_result, Exception):
+                    _LOGGER.warning("Failed to fetch position instrument metadata: %s", instruments_result)
+                else:
+                    instruments_by_id = instruments_result
 
             return EToroData(
                 pnl_raw=pnl,
                 watchlists=watchlists,
                 watchlist_instruments=watchlist_instruments,
                 rates_by_instrument=rates_by_instrument,
+                instruments_by_id=instruments_by_id,
             )
 
         except UpdateFailed:

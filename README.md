@@ -17,7 +17,7 @@ A Home Assistant custom integration that pulls portfolio and account data from t
 | `sensor.etoro_watchlists` | Number of watchlists | count |
 | `sensor.etoro_account` | Your eToro username | — |
 
-The `open_positions` and `watchlists` sensors expose full detail in their `extra_state_attributes`, usable in automations and the HA dashboard.
+The `open_positions` and `watchlists` sensors expose full detail in their `extra_state_attributes`, usable in automations and the HA dashboard. Each open position includes both `instrument_id` and a resolved `instrument_name`/`symbol` (e.g. "Apple Inc" / "AAPL") rather than just the raw numeric id.
 
 ---
 

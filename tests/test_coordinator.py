@@ -107,6 +107,29 @@ def test_all_positions_resolves_instrument_id_across_casing_variants():
     assert positions[1]["unrealized_pl"] == -10.0
 
 
+def test_all_positions_resolves_instrument_name_from_metadata():
+    data = EToroData(
+        pnl_raw=SAMPLE_PNL,
+        instruments_by_id={
+            1001: {"displayname": "Apple Inc", "internalSymbolFull": "AAPL"},
+            2002: {"displayName": "Tesla Inc", "symbol": "TSLA"},  # alternate casing
+        },
+    )
+    positions = data.all_positions
+    assert positions[0]["instrument_name"] == "Apple Inc"
+    assert positions[0]["symbol"] == "AAPL"
+    assert positions[1]["instrument_name"] == "Tesla Inc"
+    assert positions[1]["symbol"] == "TSLA"
+
+
+def test_all_positions_falls_back_to_placeholder_name_when_metadata_missing():
+    data = EToroData(pnl_raw=SAMPLE_PNL)  # no instruments_by_id supplied
+    positions = data.all_positions
+    assert positions[0]["instrument_name"] == "Instrument 1001"
+    assert positions[1]["instrument_name"] == "Instrument 2002"
+    assert positions[0]["symbol"] is None
+
+
 def test_all_positions_falls_back_to_live_rates_for_current_rate():
     # Neither position embeds a currentRate - both should be null unless
     # rates_by_instrument fills them in via bid/ask midpoint.
