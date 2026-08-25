@@ -1,11 +1,12 @@
 {
   "domain": "etoro",
   "name": "eToro",
-  "version": "1.0.1",
-  "documentation": "https://github.com/danfulton72/ha-etoro",
-  "requirements": [],
-  "dependencies": [],
   "codeowners": ["@danfulton72"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/danfulton72/ha-etoro",
   "iot_class": "cloud_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/danfulton72/ha-etoro/issues",
+  "requirements": [],
+  "version": "1.0.1"
 }
