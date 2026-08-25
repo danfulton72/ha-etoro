@@ -2,6 +2,8 @@ name: Validate
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   schedule:
     - cron: "0 0 * * *"
@@ -53,6 +55,11 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # HACS reads repository topics and license from repository/default-branch
+          # metadata. A PR cannot make those checks pass before its LICENSE has
+          # reached main, so ignore only those repository-level checks on PRs.
+          # Pushes to main, scheduled runs, and manual runs execute the full set.
+          ignore: ${{ github.event_name == 'pull_request' && 'topics license' || '' }}
 
   version:
     name: Release version gate
