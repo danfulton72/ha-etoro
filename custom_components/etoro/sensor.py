@@ -14,10 +14,10 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_ENVIRONMENT, DOMAIN
 from .coordinator import EToroCoordinator, EToroData
+from .entity import EToroCoordinatorEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,24 +123,21 @@ async def async_setup_entry(
 ) -> None:
     from .sensor_watchlist import async_setup_watchlist_sensors
 
-    coordinator: EToroCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: EToroCoordinator = entry.runtime_data
     environment = entry.data.get(CONF_ENVIRONMENT, "real")
 
-    # Portfolio summary sensors
     async_add_entities(
         EToroSensor(coordinator, description, environment)
         for description in SENSOR_DESCRIPTIONS
     )
 
-    # One price sensor per watchlist instrument
     await async_setup_watchlist_sensors(hass, entry, async_add_entities, coordinator)
 
 
-class EToroSensor(CoordinatorEntity[EToroCoordinator], SensorEntity):
+class EToroSensor(EToroCoordinatorEntity, SensorEntity):
     """A single eToro sensor."""
 
     entity_description: EToroSensorEntityDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -148,7 +145,7 @@ class EToroSensor(CoordinatorEntity[EToroCoordinator], SensorEntity):
         description: EToroSensorEntityDescription,
         environment: str,
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, environment)
         self.entity_description = description
         self._attr_unique_id = f"etoro_{environment}_{description.key}"
         self._attr_device_info = {
@@ -180,7 +177,3 @@ class EToroSensor(CoordinatorEntity[EToroCoordinator], SensorEntity):
             return self.entity_description.extra_attrs_fn(self.coordinator.data)
         except Exception:
             return {}
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success and self.coordinator.data is not None
