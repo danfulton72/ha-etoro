@@ -1,7 +1,7 @@
 {
   "domain": "etoro",
   "name": "eToro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/danfulton72/ha-etoro",
   "requirements": [],
   "dependencies": [],
