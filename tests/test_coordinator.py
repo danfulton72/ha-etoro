@@ -1,28 +1,15 @@
-"""Functional tests for etoro.coordinator: EToroData computed properties,
-casing-robust field extraction, and position current_rate resolution."""
-import asyncio
-import sys
-
+"""Functional tests for etoro.coordinator computed properties and helpers."""
 import pytest
 
 from etoro.coordinator import EToroCoordinator, EToroData, _get_ci
 
 
-# ---------------------------------------------------------------------------
-# _get_ci helper
-# ---------------------------------------------------------------------------
-
 def test_get_ci_finds_first_matching_key_variant():
     assert _get_ci({"instrumentID": 5}, "instrumentId", "instrumentID") == 5
     assert _get_ci({"InstrumentId": 7}, "instrumentId", "InstrumentId") == 7
     assert _get_ci({}, "instrumentId", "instrumentID") is None
-    # Explicit None value should be skipped in favor of a later valid key
     assert _get_ci({"instrumentId": None, "instrumentID": 9}, "instrumentId", "instrumentID") == 9
 
-
-# ---------------------------------------------------------------------------
-# EToroData portfolio math
-# ---------------------------------------------------------------------------
 
 SAMPLE_PNL = {
     "clientPortfolio": {
@@ -38,9 +25,6 @@ SAMPLE_PNL = {
                 "unrealizedPnL": {"pnL": 25.5},
             },
             {
-                # Simulates the real-world bug report: instrumentId absent
-                # under the expected key but present under a different casing,
-                # and no embedded current rate at all.
                 "instrumentID": 2002,
                 "amount": 300.0,
                 "openRate": 50.0,
@@ -62,7 +46,7 @@ SAMPLE_PNL = {
         "orders": [{"amount": 100.0}],
         "ordersForOpen": [
             {"amount": 50.0, "mirrorID": 0, "totalExternalCosts": 1.0},
-            {"amount": 999.0, "mirrorID": 7},  # belongs to a mirror, excluded from manual calc
+            {"amount": 999.0, "mirrorID": 7},
         ],
         "realizedPnL": 42.0,
     }
@@ -71,21 +55,9 @@ SAMPLE_PNL = {
 
 def test_equity_available_cash_and_invested_math():
     data = EToroData(pnl_raw=SAMPLE_PNL)
-
-    # available_cash = credit - (manual pending orders + MIT orders)
-    #                = 10000 - ((50) + 100) = 9850
     assert data.available_cash == 9850.0
-
-    # unrealized_pl = manual positions pnL + mirror position pnL + mirror closed pnL
-    #               = (25.5 - 10.0) + 5.0 + 50.0 = 70.5
     assert data.unrealized_pl == 70.5
-
-    # total_invested = manual pos amounts (500+300) + mirror pos amount (200)
-    #                + mirror_available (1000 - 50) + manual order amount (50)
-    #                + manual order costs (1.0) + MIT amount (100)
-    #                = 800 + 200 + 950 + 50 + 1 + 100 = 2101
     assert data.total_invested == 2101.0
-
     assert data.equity == round(data.available_cash + data.total_invested + data.unrealized_pl, 2)
     assert data.realized_pl == 42.0
     assert data.open_positions_count == 2
@@ -95,24 +67,43 @@ def test_all_positions_resolves_instrument_id_across_casing_variants():
     data = EToroData(pnl_raw=SAMPLE_PNL)
     positions = data.all_positions
     assert len(positions) == 2
-
-    # First position: standard casing
     assert positions[0]["instrument_id"] == 1001
     assert positions[0]["direction"] == "BUY"
     assert positions[0]["unrealized_pl"] == 25.5
-
-    # Second position: alternate casing (instrumentID) - this was null before the fix
     assert positions[1]["instrument_id"] == 2002
     assert positions[1]["direction"] == "SELL"
     assert positions[1]["unrealized_pl"] == -10.0
 
 
-def test_all_positions_resolves_instrument_name_from_metadata():
+def test_all_positions_resolves_current_etoro_instrument_metadata():
+    data = EToroData(
+        pnl_raw=SAMPLE_PNL,
+        instruments_by_id={
+            1001: {
+                "instrumentID": 1001,
+                "instrumentDisplayName": "Apple Inc",
+                "symbolFull": "AAPL",
+            },
+            2002: {
+                "instrumentID": 2002,
+                "instrumentDisplayName": "Tesla Inc",
+                "symbolFull": "TSLA",
+            },
+        },
+    )
+    positions = data.all_positions
+    assert positions[0]["instrument_name"] == "Apple Inc"
+    assert positions[0]["symbol"] == "AAPL"
+    assert positions[1]["instrument_name"] == "Tesla Inc"
+    assert positions[1]["symbol"] == "TSLA"
+
+
+def test_all_positions_retains_legacy_metadata_field_support():
     data = EToroData(
         pnl_raw=SAMPLE_PNL,
         instruments_by_id={
             1001: {"displayname": "Apple Inc", "internalSymbolFull": "AAPL"},
-            2002: {"displayName": "Tesla Inc", "symbol": "TSLA"},  # alternate casing
+            2002: {"displayName": "Tesla Inc", "symbol": "TSLA"},
         },
     )
     positions = data.all_positions
@@ -123,7 +114,7 @@ def test_all_positions_resolves_instrument_name_from_metadata():
 
 
 def test_all_positions_falls_back_to_placeholder_name_when_metadata_missing():
-    data = EToroData(pnl_raw=SAMPLE_PNL)  # no instruments_by_id supplied
+    data = EToroData(pnl_raw=SAMPLE_PNL)
     positions = data.all_positions
     assert positions[0]["instrument_name"] == "Instrument 1001"
     assert positions[1]["instrument_name"] == "Instrument 2002"
@@ -131,13 +122,11 @@ def test_all_positions_falls_back_to_placeholder_name_when_metadata_missing():
 
 
 def test_all_positions_falls_back_to_live_rates_for_current_rate():
-    # Neither position embeds a currentRate - both should be null unless
-    # rates_by_instrument fills them in via bid/ask midpoint.
     data = EToroData(
         pnl_raw=SAMPLE_PNL,
         rates_by_instrument={
             1001: {"bid": 101.0, "ask": 101.4},
-            2002: {"Bid": 49.0, "Ask": 49.2},  # capitalized variant
+            2002: {"Bid": 49.0, "Ask": 49.2},
         },
     )
     positions = data.all_positions
@@ -146,7 +135,7 @@ def test_all_positions_falls_back_to_live_rates_for_current_rate():
 
 
 def test_all_positions_current_rate_none_when_no_rate_data_available():
-    data = EToroData(pnl_raw=SAMPLE_PNL)  # no rates_by_instrument supplied
+    data = EToroData(pnl_raw=SAMPLE_PNL)
     positions = data.all_positions
     assert positions[0]["current_rate"] is None
     assert positions[1]["current_rate"] is None
@@ -176,10 +165,6 @@ def test_empty_portfolio_does_not_error():
     assert data.all_positions == []
     assert data.realized_pl is None
 
-
-# ---------------------------------------------------------------------------
-# EToroCoordinator._extract_position_instrument_ids
-# ---------------------------------------------------------------------------
 
 def test_extract_position_instrument_ids_handles_manual_and_mirror_positions():
     pnl = {
