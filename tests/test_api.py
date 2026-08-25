@@ -7,9 +7,10 @@ from etoro.api import EToroApiClient, EToroAuthError, EToroConnectionError
 
 
 class _FakeResponse:
-    def __init__(self, status: int, payload):
+    def __init__(self, status: int, payload, headers=None):
         self.status = status
         self._payload = payload
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -25,20 +26,27 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    """Records the last request and returns a pre-configured response."""
+    """Records requests and returns configured responses."""
 
-    def __init__(self, status=200, payload=None):
+    def __init__(self, status=200, payload=None, headers=None, responses=None):
         self.status = status
         self.payload = payload if payload is not None else {}
+        self.headers = headers or {}
+        self.responses = list(responses or [])
         self.last_url = None
         self.last_params = None
         self.last_headers = None
+        self.request_count = 0
 
     def get(self, url, headers=None, params=None, timeout=None):
         self.last_url = url
         self.last_params = params
         self.last_headers = headers
-        return _FakeResponse(self.status, self.payload)
+        self.request_count += 1
+        if self.responses:
+            status, payload, response_headers = self.responses.pop(0)
+            return _FakeResponse(status, payload, response_headers)
+        return _FakeResponse(self.status, self.payload, self.headers)
 
 
 def _client(session, environment="real"):
@@ -56,7 +64,7 @@ async def test_headers_include_required_auth_fields():
     assert headers["x-api-key"] == "pk_test"
     assert headers["x-user-key"] == "uk_test"
     assert "x-request-id" in headers
-    assert len(headers["x-request-id"]) == 36  # uuid4 string length
+    assert len(headers["x-request-id"]) == 36
 
 
 @pytest.mark.asyncio
@@ -83,6 +91,27 @@ async def test_connection_error_raised_on_5xx():
     client = _client(session)
     with pytest.raises(EToroConnectionError):
         await client.get_pnl()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_retries_using_retry_after(monkeypatch):
+    delays = []
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr("etoro.api.asyncio.sleep", fake_sleep)
+    session = _FakeSession(
+        responses=[
+            (429, {"message": "slow down"}, {"Retry-After": "2"}),
+            (200, {"clientPortfolio": {}}, {}),
+        ]
+    )
+    client = _client(session)
+
+    assert await client.get_pnl() == {"clientPortfolio": {}}
+    assert session.request_count == 2
+    assert delays == [2.0]
 
 
 @pytest.mark.asyncio
@@ -133,7 +162,6 @@ async def test_get_rates_parses_multiple_casing_variants_and_keys_by_int():
     assert rates[2002]["bid"] == 2.1
     assert rates[3003]["bid"] == 3.1
     assert rates[4004]["bid"] == 4.1
-    # comma-joined ids sent as query param
     assert session.last_params["instrumentIds"] == "1001,2002,3003,4004"
 
 
@@ -142,24 +170,29 @@ async def test_get_rates_returns_empty_dict_for_empty_input():
     session = _FakeSession()
     client = _client(session)
     assert await client.get_rates([]) == {}
-    assert session.last_url is None  # no request should have been made
+    assert session.last_url is None
 
 
 @pytest.mark.asyncio
-async def test_get_instruments_parses_metadata_by_instrument_id():
-    session = _FakeSession(payload={"instruments": [
-        {"instrumentId": 1001, "displayname": "Apple Inc", "internalSymbolFull": "AAPL"}
+async def test_get_instruments_parses_current_etoro_metadata_shape():
+    session = _FakeSession(payload={"instrumentDisplayDatas": [
+        {
+            "instrumentID": 1699,
+            "instrumentDisplayName": "Example Instrument",
+            "symbolFull": "EXAMPLE",
+            "instrumentTypeID": 5,
+        }
     ]})
     client = _client(session)
-    result = await client.get_instruments([1001])
-    assert result[1001]["displayname"] == "Apple Inc"
+    result = await client.get_instruments([1699])
+
+    assert result[1699]["instrumentDisplayName"] == "Example Instrument"
+    assert result[1699]["symbolFull"] == "EXAMPLE"
+    assert session.last_params == {"instrumentIds": "1699"}
 
 
 @pytest.mark.asyncio
-async def test_get_instruments_handles_all_id_casing_variants():
-    """Regression test: real-world response used 'instrumentID' (capital ID),
-    which the original code didn't check, so metadata lookups silently
-    returned nothing and instrument_name fell back to 'Instrument <id>'."""
+async def test_get_instruments_keeps_legacy_wrappers_and_id_casing_variants():
     session = _FakeSession(payload={"instruments": [
         {"instrumentID": 4016, "displayname": "Some Stock", "internalSymbolFull": "SOME"},
         {"InstrumentID": 4017, "displayname": "Other Stock", "internalSymbolFull": "OTHR"},
