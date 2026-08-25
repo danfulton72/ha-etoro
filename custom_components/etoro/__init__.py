@@ -20,8 +20,10 @@ from .coordinator import EToroCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+EToroConfigEntry = ConfigEntry[EToroCoordinator]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+
+async def async_setup_entry(hass: HomeAssistant, entry: EToroConfigEntry) -> bool:
     """Set up eToro from a config entry."""
     session = async_get_clientsession(hass)
     environment = entry.data.get(CONF_ENVIRONMENT, ENV_REAL)
@@ -47,11 +49,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: EToroConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: EToroConfigEntry) -> None:
     """Handle options update (e.g. scan interval change)."""
     await hass.config_entries.async_reload(entry.entry_id)
