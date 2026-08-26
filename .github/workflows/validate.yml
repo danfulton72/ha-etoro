@@ -75,8 +75,12 @@ jobs:
             -e INPUT_GITHUB_TOKEN="$GITHUB_TOKEN" \
             -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
             -e GITHUB_REF="$GITHUB_REF" \
+            -e GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            -e GITHUB_HEAD_REF="$GITHUB_HEAD_REF" \
+            -e GITHUB_BASE_REF="$GITHUB_BASE_REF" \
             -e GITHUB_SHA="$GITHUB_SHA" \
             -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            -e GITHUB_EVENT_PATH="$GITHUB_EVENT_PATH" \
             -e GITHUB_WORKSPACE=/github/workspace \
             ghcr.io/hacs/action:main
 
