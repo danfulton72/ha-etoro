@@ -2,8 +2,9 @@
 """Semantic version helpers for CI/release automation.
 
 Git tags are the source of truth. ``manifest.json`` mirrors the highest
-released semantic tag and is advanced by the release workflow immediately
-before the next release tag is created.
+released semantic tag. The release workflow temporarily advances the manifest
+to the next patch on the release commit, creates that tag, then syncs ``main``
+to the newly highest tag.
 """
 from __future__ import annotations
 
@@ -66,6 +67,7 @@ def main() -> None:
     subparsers.add_parser("highest")
     subparsers.add_parser("next")
     subparsers.add_parser("check-manifest-current")
+    subparsers.add_parser("sync-manifest-current")
     subparsers.add_parser("sync-manifest-next")
     args = parser.parse_args()
 
@@ -89,12 +91,21 @@ def main() -> None:
             )
         print(f"Version sync OK: {current_tag}; manifest={manifest_version}")
         return
+    if args.command == "sync-manifest-current":
+        changed = sync_manifest(current)
+        print(current_text)
+        if changed:
+            print(
+                f"Synced manifest.json to highest tag {current_tag}",
+                file=__import__("sys").stderr,
+            )
+        return
     if args.command == "sync-manifest-next":
         changed = sync_manifest(upcoming)
         print(upcoming_text)
         if changed:
             print(
-                f"Synced manifest.json from {current_tag} to v{upcoming_text}",
+                f"Synced release manifest from {current_tag} to v{upcoming_text}",
                 file=__import__("sys").stderr,
             )
         return
