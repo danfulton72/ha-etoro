@@ -1,0 +1,106 @@
+name: Release merged pull request
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact merged commit with tags
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Derive next version from highest semantic Git tag
+        id: version
+        run: |
+          git fetch --force --tags origin
+          VERSION=$(python scripts/version.py next)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Highest released tag: v$(python scripts/version.py highest)"
+          echo "Next release tag: v${VERSION}"
+
+      - name: Sync release manifest to derived version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          SYNCED_VERSION=$(python scripts/version.py sync-manifest-next)
+          test "$SYNCED_VERSION" = "$VERSION"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version = json.loads(Path("custom_components/etoro/manifest.json").read_text())["version"]
+          print(f"Release manifest version: {version}")
+          PY
+
+      - name: Commit synchronized release manifest
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/etoro/manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifest already synchronized for ${TAG}."
+          else
+            git commit -m "Sync manifest for ${TAG}"
+          fi
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Create and push semantic release tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Release tag ${TAG} already exists."
+            exit 1
+          fi
+          git tag -a "$TAG" -m "Release $TAG" "$release_sha"
+          git push origin "refs/tags/${TAG}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes
+
+      - name: Sync main manifest to highest released tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git fetch --force origin main --tags
+          git checkout -B main origin/main
+          python scripts/version.py sync-manifest-current >/dev/null
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/etoro/manifest.json
+
+          if git diff --cached --quiet; then
+            echo "main manifest already matches ${TAG}."
+            exit 0
+          fi
+
+          git commit -m "Sync manifest to ${TAG} [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -8,13 +8,22 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EToroApiClient
-from .const import CONF_API_KEY, CONF_ENVIRONMENT, CONF_USER_KEY, DEFAULT_SCAN_INTERVAL, DOMAIN, ENV_REAL, PLATFORMS
+from .const import (
+    CONF_API_KEY,
+    CONF_ENVIRONMENT,
+    CONF_USER_KEY,
+    DEFAULT_SCAN_INTERVAL,
+    ENV_REAL,
+    PLATFORMS,
+)
 from .coordinator import EToroCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+EToroConfigEntry = ConfigEntry[EToroCoordinator]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+
+async def async_setup_entry(hass: HomeAssistant, entry: EToroConfigEntry) -> bool:
     """Set up eToro from a config entry."""
     session = async_get_clientsession(hass)
     environment = entry.data.get(CONF_ENVIRONMENT, ENV_REAL)
@@ -32,8 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = EToroCoordinator(hass, client, scan_interval)
     await coordinator.async_config_entry_first_refresh()
-
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -41,14 +49,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: EToroConfigEntry) -> bool:
     """Unload a config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id)
-    return unloaded
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: EToroConfigEntry) -> None:
     """Handle options update (e.g. scan interval change)."""
     await hass.config_entries.async_reload(entry.entry_id)

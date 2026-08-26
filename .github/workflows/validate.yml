@@ -1,0 +1,104 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tests:
+    name: Tests and static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip -r requirements_test.txt
+
+      - name: Compile integration
+        run: python -m compileall -q custom_components/etoro scripts
+
+      - name: Run pyflakes
+        run: pyflakes custom_components/etoro tests scripts
+
+      - name: Run tests
+        run: pytest -q
+
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate integration with hassfest
+        run: |
+          docker pull ghcr.io/home-assistant/hassfest
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/github/workspace" \
+            ghcr.io/home-assistant/hassfest
+
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Validate repository with HACS
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HACS_IGNORE: ${{ github.event_name == 'pull_request' && 'topics license' || '' }}
+        run: |
+          docker pull ghcr.io/hacs/action:main
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/github/workspace" \
+            -w /github/workspace \
+            -e INPUT_CATEGORY=integration \
+            -e INPUT_IGNORE="$HACS_IGNORE" \
+            -e INPUT_COMMENT=false \
+            -e INPUT_REPOSITORY="$GITHUB_REPOSITORY" \
+            -e INPUT_GITHUB_TOKEN="$GITHUB_TOKEN" \
+            -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            -e GITHUB_REF="$GITHUB_REF" \
+            -e GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            -e GITHUB_HEAD_REF="$GITHUB_HEAD_REF" \
+            -e GITHUB_BASE_REF="$GITHUB_BASE_REF" \
+            -e GITHUB_SHA="$GITHUB_SHA" \
+            -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            -e GITHUB_EVENT_PATH="$GITHUB_EVENT_PATH" \
+            -e GITHUB_WORKSPACE=/github/workspace \
+            ghcr.io/hacs/action:main
+
+  version:
+    name: Tag and manifest sync gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify manifest matches highest semantic Git tag
+        run: |
+          git fetch --force --tags origin
+          python scripts/version.py check-manifest-current
+          echo "Next automatic release: v$(python scripts/version.py next)"

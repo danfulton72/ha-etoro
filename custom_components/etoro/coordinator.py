@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -45,11 +45,7 @@ class WatchlistInstrument:
 
 
 def _get_ci(d: dict, *keys: str) -> Any:
-    """Get the first present key from a dict, trying several casing variants.
-
-    The eToro API is inconsistent about field casing between endpoints (and
-    sometimes within one) - e.g. instrumentId vs instrumentID vs InstrumentId.
-    """
+    """Get the first present key from a dict, trying several casing variants."""
     for key in keys:
         if key in d and d[key] is not None:
             return d[key]
@@ -65,10 +61,6 @@ class EToroData:
     watchlist_instruments: list[WatchlistInstrument] = field(default_factory=list)
     rates_by_instrument: dict[int, dict] = field(default_factory=dict)
     instruments_by_id: dict[int, dict] = field(default_factory=dict)
-
-    # ------------------------------------------------------------------
-    # Portfolio properties - all data nested under clientPortfolio
-    # ------------------------------------------------------------------
 
     @property
     def _portfolio(self) -> dict:
@@ -145,8 +137,12 @@ class EToroData:
         )
         mit_amount = sum(float(o.get("amount", 0) or 0) for o in self.orders)
         return round(
-            pos_amount + mirror_pos_amount + mirror_available
-            + manual_orders_amount + manual_orders_costs + mit_amount,
+            pos_amount
+            + mirror_pos_amount
+            + mirror_available
+            + manual_orders_amount
+            + manual_orders_costs
+            + mit_amount,
             2,
         )
 
@@ -175,9 +171,6 @@ class EToroData:
                 p, "currentRate", "CurrentRate"
             )
             if current_rate is None and iid is not None:
-                # The pnl response doesn't always embed a live price for
-                # manual positions - fall back to the live rates lookup
-                # (same data already fetched for watchlist instruments).
                 rate = self.rates_by_instrument.get(iid, {})
                 bid = rate.get("bid") or rate.get("Bid")
                 ask = rate.get("ask") or rate.get("Ask")
@@ -188,24 +181,34 @@ class EToroData:
 
             meta = self.instruments_by_id.get(iid, {}) if iid is not None else {}
             instrument_name = _get_ci(
-                meta, "displayname", "displayName", "DisplayName"
+                meta,
+                "instrumentDisplayName",
+                "displayname",
+                "displayName",
+                "DisplayName",
             ) or (f"Instrument {iid}" if iid is not None else "Unknown")
             symbol = _get_ci(
-                meta, "internalSymbolFull", "symbol", "Symbol"
+                meta,
+                "symbolFull",
+                "internalSymbolFull",
+                "symbol",
+                "Symbol",
             )
 
-            result.append({
-                "instrument_id": iid,
-                "instrument_name": instrument_name,
-                "symbol": symbol,
-                "amount": p.get("amount"),
-                "unrealized_pl": unrealized.get("pnL"),
-                "open_rate": p.get("openRate"),
-                "current_rate": current_rate,
-                "direction": "BUY" if p.get("isBuy", True) else "SELL",
-                "leverage": p.get("leverage"),
-                "open_date": p.get("openDateTime"),
-            })
+            result.append(
+                {
+                    "instrument_id": iid,
+                    "instrument_name": instrument_name,
+                    "symbol": symbol,
+                    "amount": p.get("amount"),
+                    "unrealized_pl": unrealized.get("pnL"),
+                    "open_rate": p.get("openRate"),
+                    "current_rate": current_rate,
+                    "direction": "BUY" if p.get("isBuy", True) else "SELL",
+                    "leverage": p.get("leverage"),
+                    "open_date": p.get("openDateTime"),
+                }
+            )
         return result
 
 
@@ -225,6 +228,7 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
             update_interval=timedelta(minutes=scan_interval),
         )
         self.client = client
+        self._instrument_metadata_cache: dict[int, dict] = {}
 
     async def _async_update_data(self) -> EToroData:
         _LOGGER.debug("eToro coordinator update triggered")
@@ -246,37 +250,40 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
 
             _LOGGER.debug("eToro raw PnL response: %s", pnl)
 
-            # Fetch watchlist items + market data
             watchlist_instruments = await self._fetch_watchlist_prices(watchlists)
 
-            # Fetch live rates + display-name metadata for open-position
-            # instruments (rates fill in current_rate, metadata resolves
-            # instrument_name instead of a bare numeric id)
             position_ids = self._extract_position_instrument_ids(pnl)
             rates_by_instrument: dict[int, dict] = {}
-            instruments_by_id: dict[int, dict] = {}
+
             if position_ids:
-                results = await asyncio.gather(
-                    self.client.get_rates(list(position_ids)),
-                    self.client.get_instruments(list(position_ids)),
-                    return_exceptions=True,
-                )
-                rates_result, instruments_result = results
+                missing_metadata_ids = position_ids - self._instrument_metadata_cache.keys()
+                coroutines = [self.client.get_rates(list(position_ids))]
+                if missing_metadata_ids:
+                    coroutines.append(self.client.get_instruments(list(missing_metadata_ids)))
+
+                results = await asyncio.gather(*coroutines, return_exceptions=True)
+                rates_result = results[0]
                 if isinstance(rates_result, Exception):
                     _LOGGER.warning("Failed to fetch position rates: %s", rates_result)
                 else:
                     rates_by_instrument = rates_result
-                if isinstance(instruments_result, Exception):
-                    _LOGGER.warning("Failed to fetch position instrument metadata: %s", instruments_result)
-                else:
-                    instruments_by_id = instruments_result
+
+                if missing_metadata_ids:
+                    instruments_result = results[1]
+                    if isinstance(instruments_result, Exception):
+                        _LOGGER.warning(
+                            "Failed to fetch position instrument metadata: %s",
+                            instruments_result,
+                        )
+                    else:
+                        self._instrument_metadata_cache.update(instruments_result)
 
             return EToroData(
                 pnl_raw=pnl,
                 watchlists=watchlists,
                 watchlist_instruments=watchlist_instruments,
                 rates_by_instrument=rates_by_instrument,
-                instruments_by_id=instruments_by_id,
+                instruments_by_id=dict(self._instrument_metadata_cache),
             )
 
         except UpdateFailed:
@@ -304,15 +311,10 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
         return ids
 
     async def _fetch_watchlist_prices(self, watchlists: list[dict]) -> list[WatchlistInstrument]:
-        """Extract instruments from embedded watchlist items, then bulk-fetch rates.
-
-        The /watchlists response already includes items with full market metadata -
-        no separate items endpoint needed.
-        """
+        """Extract instruments from embedded watchlist items, then bulk-fetch rates."""
         if not watchlists:
             return []
 
-        # Step 1: collect unique instruments directly from embedded items
         instrument_to_watchlists: dict[int, list[tuple[dict, dict]]] = {}
 
         for wl in watchlists:
@@ -336,7 +338,6 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
         if not instrument_to_watchlists:
             return []
 
-        # Step 2: bulk-fetch live rates (single API call for all instruments)
         all_ids = list(instrument_to_watchlists.keys())
         try:
             rates = await self.client.get_rates(all_ids)
@@ -344,7 +345,6 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
             _LOGGER.warning("Failed to fetch watchlist rates: %s", err)
             rates = {}
 
-        # Step 3: build WatchlistInstrument objects using embedded market metadata
         seen: set[int] = set()
         output: list[WatchlistInstrument] = []
 
@@ -354,17 +354,16 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
             seen.add(iid)
 
             wl, item = wl_item_pairs[0]
-
-            # Market metadata is already embedded in the item
             market = item.get("market") or {}
             display_name = market.get("displayName") or market.get("name") or f"Instrument {iid}"
             symbol = market.get("symbolName") or market.get("symbol") or display_name
 
-            # Collect all watchlist names this instrument appears in
-            all_wl_names = list({
-                (w.get("name") or w.get("displayName") or str(w.get("watchlistId", "")))
-                for w, _ in wl_item_pairs
-            })
+            all_wl_names = list(
+                {
+                    (w.get("name") or w.get("displayName") or str(w.get("watchlistId", "")))
+                    for w, _ in wl_item_pairs
+                }
+            )
 
             rate = rates.get(iid, {})
             bid = _safe_float(rate.get("bid") or rate.get("Bid"))
@@ -372,20 +371,21 @@ class EToroCoordinator(DataUpdateCoordinator[EToroData]):
             last_close = _safe_float(rate.get("lastDailyClose") or rate.get("LastDailyClose"))
             spread = round(ask - bid, 6) if bid is not None and ask is not None else None
 
-            output.append(WatchlistInstrument(
-                instrument_id=iid,
-                watchlist_id=wl.get("watchlistId") or wl.get("id", ""),
-                watchlist_name=", ".join(sorted(all_wl_names)),
-                display_name=display_name,
-                symbol=symbol,
-                bid=bid,
-                ask=ask,
-                last_daily_close=last_close,
-                spread=spread,
-            ))
+            output.append(
+                WatchlistInstrument(
+                    instrument_id=iid,
+                    watchlist_id=wl.get("watchlistId") or wl.get("id", ""),
+                    watchlist_name=", ".join(sorted(all_wl_names)),
+                    display_name=display_name,
+                    symbol=symbol,
+                    bid=bid,
+                    ask=ask,
+                    last_daily_close=last_close,
+                    spread=spread,
+                )
+            )
 
         return sorted(output, key=lambda x: x.symbol)
-
 
 
 def _safe_float(val: Any) -> float | None:
