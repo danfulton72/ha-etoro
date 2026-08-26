@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Semantic version helpers for CI/release automation.
 
-Git tags are the source of truth. The Home Assistant manifest mirrors the
-version that will be released next.
+Git tags are the source of truth. ``manifest.json`` mirrors the highest
+released semantic tag and is advanced by the release workflow immediately
+before the next release tag is created.
 """
 from __future__ import annotations
 
@@ -22,7 +23,9 @@ def semantic_tags() -> list[tuple[tuple[int, int, int], str]]:
     for tag in tags:
         match = TAG_RE.fullmatch(tag.strip())
         if match:
-            version = tuple(int(match.group(part)) for part in ("major", "minor", "patch"))
+            version = tuple(
+                int(match.group(part)) for part in ("major", "minor", "patch")
+            )
             parsed.append((version, tag))
     return parsed
 
@@ -62,34 +65,38 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("highest")
     subparsers.add_parser("next")
-    subparsers.add_parser("check-manifest-next")
+    subparsers.add_parser("check-manifest-current")
     subparsers.add_parser("sync-manifest-next")
     args = parser.parse_args()
 
     current, current_tag = highest()
+    current_text = version_text(current)
     upcoming = next_patch()
     upcoming_text = version_text(upcoming)
 
     if args.command == "highest":
-        print(version_text(current))
+        print(current_text)
         return
     if args.command == "next":
         print(upcoming_text)
         return
-    if args.command == "check-manifest-next":
+    if args.command == "check-manifest-current":
         manifest_version = str(read_manifest().get("version", ""))
-        if manifest_version != upcoming_text:
+        if manifest_version != current_text:
             raise SystemExit(
                 f"manifest.json version {manifest_version!r} is out of sync: "
-                f"highest semantic tag is {current_tag}, so next release is v{upcoming_text}"
+                f"highest semantic Git tag is {current_tag} ({current_text})"
             )
-        print(f"Version sync OK: {current_tag} -> v{upcoming_text}; manifest={manifest_version}")
+        print(f"Version sync OK: {current_tag}; manifest={manifest_version}")
         return
     if args.command == "sync-manifest-next":
         changed = sync_manifest(upcoming)
         print(upcoming_text)
         if changed:
-            print(f"Synced manifest.json to {upcoming_text}", file=__import__("sys").stderr)
+            print(
+                f"Synced manifest.json from {current_tag} to v{upcoming_text}",
+                file=__import__("sys").stderr,
+            )
         return
 
 
