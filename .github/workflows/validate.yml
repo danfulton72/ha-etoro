@@ -30,10 +30,10 @@ jobs:
         run: python -m pip install --upgrade pip -r requirements_test.txt
 
       - name: Compile integration
-        run: python -m compileall -q custom_components/etoro
+        run: python -m compileall -q custom_components/etoro scripts
 
       - name: Run pyflakes
-        run: pyflakes custom_components/etoro tests
+        run: pyflakes custom_components/etoro tests scripts
 
       - name: Run tests
         run: pytest -q
@@ -85,51 +85,20 @@ jobs:
             ghcr.io/hacs/action:main
 
   version:
-    name: Release version gate
+    name: Tag and manifest sync gate
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
+      - name: Checkout repository with tags
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Verify manifest version changed and tag is unused
-        env:
-          BASE_REF: ${{ github.base_ref }}
+      - name: Verify manifest matches highest semantic Git tag
         run: |
-          python <<'PY'
-          import json
-          import re
-          import subprocess
-          from pathlib import Path
-
-          manifest_path = "custom_components/etoro/manifest.json"
-          current = json.loads(Path(manifest_path).read_text())["version"]
-          base_raw = subprocess.check_output(
-              ["git", "show", f"origin/{__import__('os').environ['BASE_REF']}:{manifest_path}"],
-              text=True,
-          )
-          base = json.loads(base_raw)["version"]
-
-          if not re.fullmatch(r"\d+\.\d+\.\d+", current):
-              raise SystemExit(f"manifest version must use MAJOR.MINOR.PATCH, got {current!r}")
-          if current == base:
-              raise SystemExit(
-                  f"Every merged PR creates a release, so manifest.json must be bumped (still {current})."
-              )
-
-          tag = f"v{current}"
-          existing = subprocess.run(
-              ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
-              check=False,
-              stdout=subprocess.DEVNULL,
-          )
-          if existing.returncode == 0:
-              raise SystemExit(f"Release tag {tag} already exists; choose a new manifest version.")
-
-          print(f"Release version OK: {base} -> {current} ({tag})")
-          PY
+          git fetch --force --tags origin
+          python scripts/version.py check-manifest-current
+          echo "Next automatic release: v$(python scripts/version.py next)"
