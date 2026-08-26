@@ -44,22 +44,41 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Validate integration with hassfest
-        uses: home-assistant/actions/hassfest@master
+        run: |
+          docker pull ghcr.io/home-assistant/hassfest
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/github/workspace" \
+            ghcr.io/home-assistant/hassfest
 
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Validate repository with HACS
-        uses: hacs/action@main
-        with:
-          category: integration
-          # HACS reads repository topics and license from repository/default-branch
-          # metadata. A PR cannot make those checks pass before its LICENSE has
-          # reached main, so ignore only those repository-level checks on PRs.
-          # Pushes to main, scheduled runs, and manual runs execute the full set.
-          ignore: ${{ github.event_name == 'pull_request' && 'topics license' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HACS_IGNORE: ${{ github.event_name == 'pull_request' && 'topics license' || '' }}
+        run: |
+          docker pull ghcr.io/hacs/action:main
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/github/workspace" \
+            -w /github/workspace \
+            -e INPUT_CATEGORY=integration \
+            -e INPUT_IGNORE="$HACS_IGNORE" \
+            -e INPUT_COMMENT=false \
+            -e INPUT_REPOSITORY="$GITHUB_REPOSITORY" \
+            -e INPUT_GITHUB_TOKEN="$GITHUB_TOKEN" \
+            -e GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            -e GITHUB_REF="$GITHUB_REF" \
+            -e GITHUB_SHA="$GITHUB_SHA" \
+            -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            -e GITHUB_WORKSPACE=/github/workspace \
+            ghcr.io/hacs/action:main
 
   version:
     name: Release version gate
